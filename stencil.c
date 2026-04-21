@@ -2,19 +2,26 @@
 
 
 int main(int argc, char **argv) {
-	if (4 != argc) {
+  if (4 != argc) {
 		printf("Usage: stencil input_file output_file number_of_applications\n");
 		return 1;
 	}
 	char *input_name = argv[1];
 	char *output_name = argv[2];
 	int num_steps = atoi(argv[3]);
-
 	// Read input file
 	double *input;
 	int num_values;
+
+	int rank, n_procs;
+	MPI_Init(NULL,NULL);
+	MPI_Comm_rank(MPI_COMM_WORLD,&rank);
+	MPI_Comm_size(MPI_COMM_WORLD,&n_procs);
+
+	if (rank==0){
 	if (0 > (num_values = read_input(input_name, &input))) {
 		return 2;
+	}
 	}
 
 	// Stencil values
@@ -23,8 +30,23 @@ int main(int argc, char **argv) {
 	const int EXTENT = STENCIL_WIDTH/2;
 	const double STENCIL[] = {1.0/(12*h), -8.0/(12*h), 0.0, 8.0/(12*h), -1.0/(12*h)};
 
+
+	
 	// Start timer
+
+	
+	int sublistsize=num_values/n_procs;
+	double * sublist = malloc(sublistsize*sizeof(double));
+	MPI_Scatter(input,sublistsize,MPI_DOUBLE,sublist,sublistsize,MPI_DOUBLE,0,MPI_COMM_WORLD);
+
+	//printf("INPUT %f \n",input[0]);
+	printf("OUTPUT %f \n",sublist[0]);
+	printf("Sublistsize %d \n",sublistsize);
+		
+	
+	printf("rank: %d\n",rank);
 	double start = MPI_Wtime();
+	
 
 	// Allocate data for result
 	double *output;
@@ -33,9 +55,12 @@ int main(int argc, char **argv) {
 		return 2;
 	}
 	// Repeatedly apply stencil
+
+	if (rank==0){
+	
 	for (int s=0; s<num_steps; s++) {
 		// Apply stencil
-		for (int i=0; i<EXTENT; i++) {
+	  for (int i=0; i<EXTENT; i++) { //First BC
 			double result = 0;
 			for (int j=0; j<STENCIL_WIDTH; j++) {
 				int index = (i - EXTENT + j + num_values) % num_values;
@@ -43,7 +68,7 @@ int main(int argc, char **argv) {
 			}
 			output[i] = result;
 		}
-		for (int i=EXTENT; i<num_values-EXTENT; i++) {
+	  for (int i=EXTENT; i<num_values-EXTENT; i++) { //Middle part
 			double result = 0;
 			for (int j=0; j<STENCIL_WIDTH; j++) {
 				int index = i - EXTENT + j;
@@ -51,7 +76,7 @@ int main(int argc, char **argv) {
 			}
 			output[i] = result;
 		}
-		for (int i=num_values-EXTENT; i<num_values; i++) {
+	  for (int i=num_values-EXTENT; i<num_values; i++) { //End BC
 			double result = 0;
 			for (int j=0; j<STENCIL_WIDTH; j++) {
 				int index = (i - EXTENT + j) % num_values;
@@ -66,21 +91,27 @@ int main(int argc, char **argv) {
 			output = tmp;
 		}
 	}
+	
+	
 	free(input);
+	}
 	// Stop timer
 	double my_execution_time = MPI_Wtime() - start;
-
+	
 	// Write result
 	printf("%f\n", my_execution_time);
 #ifdef PRODUCE_OUTPUT_FILE
-	if (0 != write_output(output_name, output, num_values)) {
-		return 2;
+	if (rank==0){
+	  if (0 != write_output(output_name, output, num_values)) {
+	    printf("BRUH");
+	    return 2;
+	  }
 	}
 #endif
 
 	// Clean up
 	free(output);
-
+	MPI_Finalize();
 	return 0;
 }
 
